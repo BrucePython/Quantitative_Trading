@@ -1,0 +1,61 @@
+"""需求：
+每日选股：获得市盈率大于50且小于65，营业总收入前10的股票
+调仓：每日调仓，将所有资金平摊到这10个股票的购买策略，一次性卖出所有不符合条件的
+买卖：买入每天选出来的10支股票，卖出不符合条件的股票。
+优化：
+1. 按月调仓，需要用到scheduler定时器函数
+2. 投资对象：HS300
+"""
+
+def init(context):
+    # 定义一个选股范围，只获取股票名
+    context.hs300 = index_components("000300.XSHG")
+    scheduler.run_weekly(get_data,tradingday=1)
+    
+    
+def get_data(context, bar_dict):
+    
+    """
+    删掉两个过滤条件
+    .filter(
+        fundamentals.eod_derivative_indicator.pe_ratio>50
+        ).filter(
+        fundamentals.eod_derivative_indicator.pe_ratio<65
+        )
+    """
+    q = query(
+        fundamentals.eod_derivative_indicator.pe_ratio,
+        fundamentals.income_statement.revenue
+        ).order_by(
+        fundamentals.income_statement.revenue.desc()
+        ).filter(
+        fundamentals.stockcode.in_(context.hs300)
+        ).limit(10)
+    fund = get_fundamentals(q)
+    # 获取股票名字：转置之后，列就是股票名
+    context.stock_list = fund.T.index
+
+
+def before_trading(context):
+    pass
+
+
+def handle_bar(context, bar_dict):
+    # 进行交易
+    # 先判断仓位是否有股票，如果有则
+    # 再判断第一天(旧)的持有的股票在不在第二天(新)的股票池中，如果没有，则【卖出】
+    if len(context.portfolio.positions.keys())!= 0:
+        # 列表的长度不为0 => 有仓位
+        for stock in context.portfolio.positions.keys():
+            # 如果旧的持有的股票不在新的股票池里，卖出
+            if stock not in context.stock_list:
+                order_target_percent(stock, 0) # 卖出
+    
+    # 等比例资金【买入】每日更新的股票池中的股票
+    # 投资组合总价值的百分比，平分成10份
+    weight = 1.0 / len(context.stock_list)  # 每份股票占比相等
+    for stock in context.stock_list:
+        order_target_percent(stock, weight)
+
+def after_trading(context):
+    pass
