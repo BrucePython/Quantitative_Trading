@@ -1,0 +1,68 @@
+
+def init(context):
+    # 获取单个公司股票代码
+    context.stock = "000001.XSHE"
+    
+    # 获取计算机通信行业的公司股票代码
+    context.stock_list = industry("C39")
+    
+    # 获取能源板块的公司股票代码
+    context.stock_sector = sector("energy")
+    
+    # 获取指数股票代码
+    context.stock_index = index_components("000300.XSHG")
+    
+    # 按月运行的定时器：每月查询一次，只在第一个交易日运行
+    scheduler.run_monthly(get_data,tradingday=1)
+
+def get_data(context, bar_dict):
+    q = query(fundamentals.eod_derivative_indicator.pb_ratio).filter(fundamentals.stockcode.in_(context.stock_index))
+    fund = get_fundamentals(q)
+    logger.info(fund.T)
+    
+    
+def before_trading(context):
+    # logger.info("也能打印输出") 
+    # print("获取单个公司股票代码",context.stock)
+    # print("获取计算机通信行业的公司股票代码", context.stock_list)
+    # print("获取能源板块的公司股票代码", context.stock_sector)
+    # print("获取指数股票代码：", context.stock_index)
+    pass
+
+def handle_bar(context, bar_dict):
+    # 获取行情数据，基本的每日交易数据
+    """
+    history_bars():
+    第一个参数：股票的代码（只能(默认)获取一个）；
+    第二个参数：总共获取的数据：5（从当前日期运行开始到之前的5天的行情数据）
+    第三个参数：频率，1d，按照一天获取数据。 若把频率改成1分钟：获取从今天开始，前面1分钟的前5天的数据，则要改成分钟回测（back test）
+    open, close：获取开盘，收盘的价格
+    
+    close = history_bars(context.stock,5,'1d','close')
+    close_open = history_bars(context.stock,5,'1d',['close', 'open'])    # 获取多个指标
+    # close_1m = history_bars(context.stock,5,'1m','close')
+    logger.info(close)  # 类型为ndarray
+    """
+    
+    """
+    # 获取财务数据：默认获取所有A股的股票财务数据
+    # 创建一个查询语句
+    # q = query(fundamentals.eod_derivative_indicator.pe_ratio)
+    
+    # 增加filter, order_by, limit, stockcode：必须先查询，才能过滤
+    q = query(
+        fundamentals.eod_derivative_indicator.pe_ratio,
+        fundamentals.eod_derivative_indicator.pcf_ratio
+        ).filter(
+        fundamentals.eod_derivative_indicator.pe_ratio>20,
+        fundamentals.eod_derivative_indicator.pcf_ratio<50).order_by(fundamentals.eod_derivative_indicator.pe_ratio).filter(fundamentals.stockcode.in_(context.stock_index)).limit(10)
+     
+    # 回测不需要日期，默认当天的数据
+    fund = get_fundamentals(q)    
+    
+    logger.info(fund.T)   # DataFrame类型。使用.T转置： 股票变成行，指标变成列
+    """
+    pass
+
+def after_trading(context):
+    pass
