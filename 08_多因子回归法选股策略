@@ -1,0 +1,162 @@
+"""
+要求：
+1、回测区间：回归(2014-01-01~2016-01-01)
+   2016-01-01  ~  2018-01-01
+   
+2、选股：
+   选股区间：沪深300
+   选股因子：经过因子分析之后的若干因子，可以不知方向
+   选股权重：回归训练的权重
+   数据处理：缺失值、去极值、标准化、市值中心化处理（防止选股集中）
+3、调仓周期：
+   调仓：每月进行一次调仓
+   交易规则：卖出已持有的股票
+         买入新的股票池当中的股票
+         
+步骤：
+准备因子数据
+处理数据函数
+    去极值，标准化
+选股函数(每月调整股票池)
+    select_stocklist(context)
+定期调仓函数
+    rebalance(context)
+"""
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import LinearRegression
+
+
+def init(context):
+    # 定义沪深300的股票类别
+    context.hs300 = index_components("000300.XSHG")
+    
+    # 初始化股票因子权重
+    context.weights = np.array([-0.01864979, -0.04537212, -0.18487143, -0.06092573,  0.18599453,-0.02088234,  0.03341527,  0.91743347, -0.8066782 ])
+    
+    # 定义股票池数量
+    context.stock_num = 20
+    
+    # 定义每月运行函数
+    scheduler.run_monthly(regression_selector, tradingday=1)
+
+def regression_selector(context, bar_dict):
+    """回归法预测选股逻辑"""
+    # 1. 查询因子数据：查询的因子顺序与回归权重一样
+    q = query(
+        fundamentals.eod_derivative_indicator.pe_ratio, 
+        fundamentals.eod_derivative_indicator.pb_ratio,
+        fundamentals.eod_derivative_indicator.market_cap, 
+        fundamentals.financial_indicator.ev, 
+        fundamentals.financial_indicator.return_on_asset_net_profit, 
+        fundamentals.financial_indicator.du_return_on_equity, 
+        fundamentals.financial_indicator.earnings_per_share, 
+        fundamentals.income_statement.revenue, 
+        fundamentals.income_statement.total_expense
+        ).filter(fundamentals.stockcode.in_(context.hs300))
+    
+    context.factors = get_fundamentals(q).T    # 转置
+        
+    # 2. 处理因子（特征值）数据
+    dealwith_data(context)
+    
+    # 3. 根据每个当前月预测下月收益率大小，并替换股票池
+    select_stocklist(context)
+    
+    # 4. 根据股票池的股票列表，进行调仓
+    rebalance(context)
+    
+def dealwith_data(context):
+    """删除空缺值，去极值，标准化，市值中性化"""
+
+    context.factors = context.factors.dropna()    # 删除空缺值
+    
+    # 拿出市值因子，作为市值中性化的特征值；不做去极值，标准化处理
+    market_cap_factors = context.factors["market_cap"]
+    
+    for name in context.factors.columns:
+        context.factors[name] = mad(context.factors[name])      # 去极值
+        context.factors[name] = stand(context.factors[name])    # 标准化
+        
+        # 市值中性化处理（除了市值因子）
+        if name == "market_cap":
+            continue
+        
+        x = market_cap_factors.reshape(-1,1)    # 特征值：市值因子。要求二维
+        y_factor = context.factors[name]        # 目标值：其他8个因子。要求一维
+        
+        # 建立回归方程
+        lr = LinearRegression()
+        lr.fit(x, y_factor)
+        y_predict = lr.predict(x)
+        # 得出误差，将误差替换每个因子值
+        context.factors[name] = y_factor - y_predict
+        
+        
+def select_stocklist(context):
+    """回归计算，得出预测的收益率，筛选出收益率高的股票"""
+    # 特征值：context.factors，形状：（300，9）
+    # 系数：9个因子权重，形状：（9，1）
+    # 进行矩阵运算，结果为预测的下月收益率
+    # x(l行, m列) * w(m行, n列) = predict(l行, n列)
+    # (300, 9)*(9, 1) = (300, 1)
+    
+    # 预测的下月收益率。如果收益率高，则下个月持有该股票
+    stock_return = np.dot(context.factors.values, context.weights)
+    
+    # 先不排序，因为每个预测收益率对应一支股票，排序后就不知道是哪支股票
+    
+    # 给factors新建一列下月股票收益率，默认对应股票代码和收益率，因为矩阵运算不会改变顺序
+    context.factors["stock_return"] = stock_return
+    
+    # 进行收益率从大到小排序，选择前20支股票
+    context.stock_list = context.factors.sort_values(by="stock_return", ascending=False).index[:context.stock_num]
+    logger.info(context.stock_list)
+
+def rebalance(context):
+    """进行调仓"""
+    # 卖出：
+    for stock in context.portfolio.positions.keys():
+        # 如果当前股票仓位>0。（否则：空仓位会越来越多）
+        if context.portfolio.positions[stock].quantity > 0:
+            if stock not in context.stock_list:
+                order_target_percent(stock, 0)
+    
+    # 买入
+    for stock in context.stock_list:
+        order_target_percent(stock, 1/len(context.stock_list))
+
+def before_trading(context):
+    pass
+
+def handle_bar(context, bar_dict):
+    pass
+
+def after_trading(context):
+    pass
+
+def mad(factor):
+    """自实现3倍中位数绝对值偏差去极值"""
+    # 1、找出因子的中位数 median
+    median_factor = np.median(factor)
+    
+    # 2、得到每个因子值与中位数的绝对偏差值 |x – median|
+    # 3、得到绝对偏差值的中位数， MAD = median(|x – median|)
+    mad = np.median(abs(factor-median_factor))
+    
+    # 4、计算MAD_e = 1.4826*MAD，然后确定参数 n，做出调整
+    # 定义3倍中位数的上下限制
+    high = median_factor + (3 * 1.4826 * mad)
+    low = median_factor - (3 * 1.4826 * mad)
+    
+    # 利用3倍中位数的值去极值
+    factor = np.where(factor > high, high, factor)
+    factor = np.where(factor < low, low, factor)
+    return factor
+
+  
+def stand(factor):
+    """自实现标准化，相当于StandScaler"""
+    mean = factor.mean()
+    std_dev = factor.std()
+    return (factor-mean)/std_dev
