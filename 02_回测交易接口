@@ -1,0 +1,40 @@
+def init(context):
+    context.s1 = "000001.XSHE"
+
+
+def before_trading(context):
+    pass
+
+
+
+def handle_bar(context, bar_dict):
+    # 进行交易，以每日收盘价为准
+    
+    # 假如第一天收盘价为每股11.33，要买1000股，总价为
+    # order_shares(context.s1, 1000)
+    
+    # 持仓的总价值都是固定的
+    order_target_percent(context.s1, 0.1)
+    
+    order_target_percent("000004.XSHG", 0.1)
+    
+    # 一旦买入/交易之后，投资组合(资金和仓位)发生变化
+    # 【仓位】：当前股票代码
+    # positions对象是一个字典
+    print("输出股票列表：", context.portfolio.positions.keys())
+    print("当前持股数量：",context.portfolio.positions[context.s1].quantity)    # 持股数量不一样
+    
+    print("-----------------------------------")
+    print("持有股票的相关信息", context.stock_account)
+    print("-----------------------------------")
+    
+    # 【资金】：
+    print("投资组合的可用资金为：", context.portfolio.cash)
+    print("投资组合的市场价值为：", context.portfolio.market_value)
+    print("投资组合的总价值为：", context.portfolio.total_value)
+
+
+
+
+def after_trading(context):
+    pass
