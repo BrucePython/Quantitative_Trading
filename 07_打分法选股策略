@@ -1,0 +1,121 @@
+"""
+要求：
+1、回测区间：
+  - 2010-01-01  ~  2018-01-01
+2、选股：
+  - 选股因子：6个已知方向的因子
+    - 升序asc：market_cap（市值）、pe_ratio（市盈率）、pb_ratio（市净率）、
+    - 降序dsc：return_on_invested_capital（ROIC）、inc_revenue（营业总收入）和inc_profit_before_tax（利润增长率）
+  - 数据处理：处理缺失值
+  - 选股权重：
+    - 因子升序从小到大分10组，第几组为所在组得分
+    - 因子降序从大到小分10组，第几组为所在组得分
+  - 选股范围：
+      - 选股的指数、模块：全A股
+3、调仓周期：
+  - 调仓：每月进行一次调仓选出20个排名靠前的股票
+  - 交易规则：卖出已持有的股票
+  - 买入新的股票池当中的股票
+"""
+import pandas as pd
+
+def init(context):
+    context.asc = ["market_cap", "pe_ratio", "pb_ratio"]
+    context.dsc = ["return_on_invested_capital", "inc_revenue","inc_profit_before_tax"]
+    # 限定股票池的数量
+    context.stock_max_num = 20
+    # 按月调仓
+    scheduler.run_monthly(score_selector, tradingday=1)
+
+def score_selector(context, bar_dict):
+    """打分法选股"""
+    
+    # 1. 选出因子数据，并删除缺失值
+    factors = get_fundamentals(
+        query(
+            fundamentals.eod_derivative_indicator.market_cap,
+            fundamentals.eod_derivative_indicator.pe_ratio,
+            fundamentals.eod_derivative_indicator.pb_ratio,
+            fundamentals.financial_indicator.return_on_invested_capital,
+            fundamentals.financial_indicator.inc_revenue,
+            fundamentals.financial_indicator.inc_profit_before_tax
+            )).T.dropna()
+
+    # 2. 定义打分函数，确定股票池
+    stock_score(context, factors)
+
+    # 3. 定义调仓函数
+    rebalance(context)
+
+def stock_score(context, factors):
+    """打分的步骤，返回股票池
+    因子升序从小到大分10组，第几组为此因子的得分:
+        market_cap、pe_ratio、pb_ratio
+    因子降序从大到小分10组，第几组为此因子的得分:
+        return_on_invested_capital、inc_revenue
+    """
+    # 循环每个因子去处理
+    for name in factors.columns:
+        
+        if name in context.asc:
+            # 升序的因子，进行升序排序
+            # 返回的是单个因子值的Series
+            factor = factors.sort_values(by=name)[name]
+            # factor = factors[name].sort_values(by=name)
+            
+        else:
+            # 降序的因子，进行降序排序
+            factor = factors.sort_values(by=name, ascending=False)[name]
+
+        # 对单个因子进行打分处理：
+        
+        # 为了新增字段（series不能新增字段，只能先转DF）
+        factor = pd.DataFrame(factor)
+        
+        # 新建一个因子分数的字段，初始分数为0
+        factor[name+"_score"] = 0
+        
+        # 进行打分：
+        # 1. 分成10组，求出每组股票数量
+        stock_groupnum = len(factors)//10
+        
+        # 2. 根据每组数量和10组，从前往后依次给股票进行打分
+        for i in range(10):
+        
+            if i == 9:
+                factor[name+"_score"][(i+1)*stock_groupnum :] = i+1
+            
+            factor[name+"_score"][i*stock_groupnum : (i+1)*stock_groupnum] = i+1
+        
+        # 把每个因子的分数列【合并】到原因子数据表中
+        # concat会根据索引合并两张表，axis=1案列拼接
+        factors = pd.concat([factors,factor[name+"_score"]], axis=1)
+    # logger.info(factors)
+
+    # 对每支股票的6个因子的分数列，进行求和
+    # sum(1) 按行求和
+    factors = factors[["market_cap_score", "pe_ratio_score", "pb_ratio_score", "return_on_invested_capital_score", "inc_revenue_score", "inc_profit_before_tax_score"]].sum(1).sort_values()
+    
+    # 定义股票池
+    context.stock_list = factors.index[:context.stock_max_num]
+    
+    print(context.stock_list)
+    
+def rebalance(context):
+    """调仓函数：卖出，买入"""
+    # 卖出
+    for stock in context.portfolio.positions.keys():
+        if stock in context.stock_list:
+            order_target_percent(stock, 0)
+    # 买入
+    for stock in context.stock_list:
+        order_target_percent(stock,1/len(context.stock_list))
+    
+def before_trading(context):
+    pass
+
+def handle_bar(context, bar_dict):
+    pass
+
+def after_trading(context):
+    pass
