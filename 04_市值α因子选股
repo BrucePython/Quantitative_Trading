@@ -1,0 +1,42 @@
+"""
+说明：
+从HS300中选择值小的股票
+选定财务数据筛选
+进行每日调仓（多因子选股调仓周期频率会小一些）
+总结：
+因子的周期性
+"""
+def init(context):
+    context.hs300 = index_components("000300.XSHG")
+    
+
+def before_trading(context):
+    # 选出市值比较小的20支股票
+    q = query(
+        fundamentals.eod_derivative_indicator.market_cap
+        ).order_by(
+        fundamentals.eod_derivative_indicator.market_cap
+        ).filter(
+        fundamentals.stockcode.in_(context.hs300)
+        ).limit(20)
+    fund = get_fundamentals(q)
+    # 获取股票的名字：转置之后，列就是股票名
+    context.stock_list = fund.T.index
+
+
+def handle_bar(context, bar_dict):
+    # 卖出不在新股票池的股票
+    # 从positions里获取仓位
+    for stock in context.portfolio.positions.keys():
+        if stock not in context.stock_list:
+            # 股票不在新股票池里，卖掉
+            order_target_percent(stock, 0)
+    
+    # 买入
+    for stock in context.stock_list:
+        order_target_percent(stock, 1.0/20)
+    
+    
+
+def after_trading(context):
+    pass
