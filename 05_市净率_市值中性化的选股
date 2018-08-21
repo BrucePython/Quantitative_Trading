@@ -1,0 +1,78 @@
+"""
+用市净率因子徐那股：
+1、获取市值和市净率因子数据，
+因子：极值、标准化、中性化处理
+3、选定股票池（根据方向权重）
+市净率小的某些股票
+"""
+from sklearn.linear_model import LinearRegression
+import numpy as np
+
+def init(context):
+    scheduler.run_monthly(get_data, tradingday=1)
+
+def get_data(context, bar_dict):
+    fund = get_fundamentals(
+        query(
+            fundamentals.eod_derivative_indicator.pb_ratio,
+            fundamentals.eod_derivative_indicator.market_cap
+            ))
+    context.fund = fund.T
+    # 去极值，标准化，市值中性化处理
+    treat_data(context)
+    # 利用市净率进行选股（假设：市净率小的股票收益好，选取小于25%的pb_ratio）
+    # 先求出20%的分位数，保留小于这个分位数的值的股票
+    context.stock_list = context.fund["pb_ratio"] [context.fund["pb_ratio"] <= context.fund["pb_ratio"].quantile(0.2)].index
+
+def treat_data(context):
+    """市净率因子的处理逻辑"""
+    # 对市净率去极值、标准化
+    context.fund["pb_ratio"] = stand(mad(context.fund["pb_ratio"]))
+    
+    # 特征值：市值，目标值：市净率因子
+    x = context.fund["market_cap"].reshape(-1,1)
+    y = context.fund["pb_ratio"]
+    
+    # 建立线性回归，对市净率进行市值中性化处理
+    lr = LinearRegression()
+    lr.fit(x,y)
+    y_predict = lr.predict(x)
+    context.fund["pb_ratio"] = y - y_predict
+    
+
+def before_trading(context):
+    pass
+
+def handle_bar(context, bar_dict):
+    pass
+
+def after_trading(context):
+    pass
+
+
+def mad(factor):
+    """自实现3倍中位数绝对值偏差去极值"""
+    # 1、找出因子的中位数 median
+    median_factor = np.median(factor)
+    
+    # 2、得到每个因子值与中位数的绝对偏差值 |x – median|
+    # 3、得到绝对偏差值的中位数， MAD = median(|x – median|)
+    mad = np.median(abs(factor-median_factor))
+    
+    # 4、计算MAD_e = 1.4826*MAD，然后确定参数 n，做出调整
+    # 定义3倍中位数的上下限制
+    high = median_factor + (3 * 1.4826 * mad)    # 上限
+    low = median_factor - (3 * 1.4826 * mad)     # 下限
+    
+    # 利用3倍中位数的值去极值
+    factor = np.where(factor > high, high, factor)    # 如果参数大于极值，则把参数换成极值，否则还是参数
+    factor = np.where(factor < low, low, factor)      # 如果参数小于极值，则把参数换成极值，否则还是参数
+    return factor
+    
+
+def stand(factor):
+    """自实现标准化，相当于StandScaler"""
+    mean = factor.mean()
+    std_dev = factor.std()
+    
+    return (factor-mean)/std_dev
