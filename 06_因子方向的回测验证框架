@@ -1,0 +1,83 @@
+# 对每个因子，在股票位置（/因子方向）上的一个回测结果统计
+import numpy as np
+
+def init(context):
+    context.quantile = 1    # 依次测试区间1，2，3，4，5
+    scheduler.run_weekly(single_test, tradingday=1)
+
+def single_test(context, bar_dict):
+    fund = get_fundamentals(query(fundamentals.income_statement.basic_earnings_per_share)).T
+    
+    # 因子数据的处理：去极值，标准化
+    fund["basic_earnings_per_share"] = mad(fund["basic_earnings_per_share"])
+    fund["basic_earnings_per_share"] = stand(fund["basic_earnings_per_share"])
+    
+    print(fund)
+    # fund是DF类型，不能用来分组。只能使用series进行分组
+    data = fund.iloc[:,0]
+    
+    # 把所有股票，按照分位数（0.2，0.4，0.6，
+    # 0.8），分5组进行股票回测
+    if context.quantile == 1:
+        # 小于20%分位数的股票(一般是左开右闭)
+        data = data[data <= data.quantile(0.2)]
+    elif context.quantile == 2:    # (20%,40%]
+        data = data[(data > data.quantile(0.2)) & (data <= data.quantile(0.4))]
+    elif context.quantile == 3:    # (40%,60%]
+        data = data[(data > data.quantile(0.4)) & (data <= data.quantile(0.6))]
+    elif context.quantile == 4:    # (60%,80%]
+        data = data[(data > data.quantile(0.6)) & (data <= data.quantile(0.8))]  
+    elif context.quantile == 5:    # (80%,]
+        data = data[data > data.quantile(0.8)]
+    
+    # 建立每次回测的股票池
+    context.stock_list = data.index
+    
+def before_trading(context):
+    pass
+
+def handle_bar(context, bar_dict):
+    # 卖出
+    for stock in context.portfolio.positions.keys():
+    # 在仓里面的股票代码
+        if stock not in context.stock_list:
+        # 如果不在股票池，则卖出
+            order_target_percent(stock,0)
+    
+    # 等比例购买所有股票
+    percentage = 1 / len(context.stock_list)
+    
+    # 买入
+    for stock in context.stock_list:
+        order_target_percent(stock,percentage)
+
+def after_trading(context):
+    pass
+
+
+# 去极值，标准化处理
+def mad(factor):
+    """自实现3倍中位数绝对值偏差去极值"""
+    # 1、找出因子的中位数 median
+    median_factor = np.median(factor)
+    
+    # 2、得到每个因子值与中位数的绝对偏差值 |x – median|
+    # 3、得到绝对偏差值的中位数， MAD = median(|x – median|)
+    mad = np.median(abs(factor-median_factor))
+    
+    # 4、计算MAD_e = 1.4826*MAD，然后确定参数 n，做出调整
+    # 定义3倍中位数的上下限制
+    high = median_factor + (3 * 1.4826 * mad)
+    low = median_factor - (3 * 1.4826 * mad)
+    
+    # 利用3倍中位数的值去极值
+    factor = np.where(factor > high, high, factor)
+    factor = np.where(factor < low, low, factor)
+    return factor
+
+  
+def stand(factor):
+    """自实现标准化，相当于StandScaler"""
+    mean = factor.mean()
+    std_dev = factor.std()
+    return (factor-mean)/std_dev
