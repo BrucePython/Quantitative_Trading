@@ -1,9 +1,7 @@
 import talib
 
 
-# 在这个方法中编写任何的初始化逻辑。context对象将会在你的算法策略的任何方法之间做传递。
 def init(context):
-    # 选择我们感兴趣的股票
     context.s1 = "000001.XSHE"
     context.s2 = "601988.XSHG"
     context.s3 = "000068.XSHE"
@@ -18,16 +16,8 @@ def init(context):
     context.OBSERVATION = 100
 
 
-# 你选择的证券的数据更新将会触发此段逻辑，例如日或分钟历史数据切片或者是实时数据切片更新
+
 def handle_bar(context, bar_dict):
-    # 开始编写你的主要的算法逻辑
-
-    # bar_dict[order_book_id] 可以拿到某个证券的bar信息
-    # context.portfolio 可以拿到现在的投资组合状态信息
-
-    # 使用order_shares(id_or_ins, amount)方法进行落单
-
-    # TODO: 开始编写你的算法吧！
 
     for stock_code in context.stocks:
         # 读取历史数据，使用sma方式计算均线准确度和数据长度无关，但是在使用ema方式计算均线时建议将历史数据窗口适当放大，结果会更加准确
